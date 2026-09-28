@@ -129,11 +129,11 @@ def build_row(header, item, mapping_dict, hs_mapping, mawb_number, program_scope
         # ---------------- ORDER ----------------
         "Order_number": header.get("invoiceNumber", ""),
         
-        "Reliable_tracking": (
-            str(header.get("CCN", "")).replace("1BML", "", 1)
-            if str(header.get("CCN", "")).startswith("1BML")
-            else header.get("CCN", "")
-        ),
+        #"Reliable_tracking": (
+            #str(header.get("CCN", "")).replace("1BML", "", 1)
+            #if str(header.get("CCN", "")).startswith("1BML")
+            #else header.get("CCN", "")
+        #), original reliable tracking
 
         "Reliable_tracking 2": (
             str(header.get("CCN", ""))[4:]
@@ -191,7 +191,7 @@ def build_row(header, item, mapping_dict, hs_mapping, mawb_number, program_scope
         "PGA Flag": "CFIA",
         "Category": "HVS",
         "MAWB #": mawb_number,
-        "Carrier code": "1BML", 
+        #"Carrier code": "1BML", Original Carrier Code
 
         "Carrier code 2": (
             str(header.get("CCN", ""))[:4]
