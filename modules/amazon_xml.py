@@ -135,7 +135,7 @@ def build_row(header, item, mapping_dict, hs_mapping, mawb_number, program_scope
             #else header.get("CCN", "")
         #), original reliable tracking
 
-        "Reliable_tracking 2": (
+        "Reliable_tracking": (
             str(header.get("CCN", ""))[4:]
         ),
 
@@ -193,7 +193,7 @@ def build_row(header, item, mapping_dict, hs_mapping, mawb_number, program_scope
         "MAWB #": mawb_number,
         #"Carrier code": "1BML", Original Carrier Code
 
-        "Carrier code 2": (
+        "Carrier code": (
             str(header.get("CCN", ""))[:4]
         ), 
         
