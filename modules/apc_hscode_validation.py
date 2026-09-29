@@ -6,44 +6,20 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
-
-st.set_page_config(
-    page_title="HS Code Validator",
-    page_icon="📦",
-    layout="wide"
-)
-
-
-# ============================================================
-# HELPER
-# ============================================================
-
 def clean_value(value):
-    """
-    Clean Excel values for reliable comparison.
-    """
+    """Normalize Excel values for comparison."""
     if pd.isna(value):
         return ""
 
     value = str(value).strip()
 
-    # Excel sometimes converts numeric HS codes to:
-    # 3304990000.0
     if value.endswith(".0"):
         value = value[:-2]
 
-    # Normalize multiple spaces
     value = " ".join(value.split())
 
     return value.upper()
 
-
-# ============================================================
-# VALIDATE / PROCESS
-# ============================================================
 
 def process_hs_codes(reference_df, shipment_df):
 
@@ -59,10 +35,6 @@ def process_hs_codes(reference_df, shipment_df):
         "Goods_Description",
         "HS_code"
     ]
-
-    # --------------------------------------------------------
-    # Check columns
-    # --------------------------------------------------------
 
     missing_reference = [
         col for col in required_reference
@@ -86,49 +58,41 @@ def process_hs_codes(reference_df, shipment_df):
             + ", ".join(missing_shipment)
         )
 
-    # --------------------------------------------------------
-    # Copy data
-    # --------------------------------------------------------
-
     result = shipment_df.copy()
 
-    # Preserve original HS code
+    # Keep original HS code
     result.insert(
         result.columns.get_loc("HS_code"),
         "Original_HS_code",
-        result["HS_code"].astype(str)
+        result["HS_code"].fillna("").astype(str)
     )
 
-    # Add reference columns
+    # Add audit columns
+    hs_position = result.columns.get_loc("HS_code")
+
     result.insert(
-        result.columns.get_loc("HS_code"),
+        hs_position,
         "Reference_Client_HS_code",
         ""
     )
 
     result.insert(
-        result.columns.get_loc("HS_code"),
+        hs_position,
         "Reference_Adjusted_HS_code",
         ""
     )
 
     result.insert(
-        result.columns.get_loc("HS_code"),
+        hs_position,
         "HS_Code_Status",
         ""
     )
 
-    # Internal formatting flag
-    changed_flags = []
-
-    # --------------------------------------------------------
-    # Build reference lookup
+    # ---------------------------------------------------------
+    # FIRST FILE LOOKUP
     #
-    # KEY:
-    # Client_Internal_tracking
-    # +
-    # Goods_Description
-    # --------------------------------------------------------
+    # Tracking + Goods Description
+    # ---------------------------------------------------------
 
     reference_lookup = {}
 
@@ -158,17 +122,19 @@ def process_hs_codes(reference_df, shipment_df):
             description
         )
 
-        if key not in reference_lookup:
-            reference_lookup[key] = []
-
-        reference_lookup[key].append({
+        reference_lookup.setdefault(
+            key,
+            []
+        ).append({
             "client_hs": client_hs,
             "adjusted_hs": adjusted_hs
         })
 
-    # --------------------------------------------------------
-    # Process shipment rows
-    # --------------------------------------------------------
+    changed_flags = []
+
+    # ---------------------------------------------------------
+    # PROCESS SECOND FILE
+    # ---------------------------------------------------------
 
     for index, row in result.iterrows():
 
@@ -194,9 +160,9 @@ def process_hs_codes(reference_df, shipment_df):
             []
         )
 
-        # ----------------------------------------------------
-        # No matching product
-        # ----------------------------------------------------
+        # -----------------------------------------------------
+        # NO PRODUCT MATCH
+        # -----------------------------------------------------
 
         if not matches:
 
@@ -209,13 +175,13 @@ def process_hs_codes(reference_df, shipment_df):
 
             continue
 
-        # ----------------------------------------------------
-        # PRIORITY 1:
+        # -----------------------------------------------------
+        # PRIORITY 1
         #
-        # Check current HS against Client_HS_code
+        # Check Client_HS_code FIRST
         #
         # Client_HS_code = INVALID
-        # ----------------------------------------------------
+        # -----------------------------------------------------
 
         invalid_match = None
 
@@ -228,20 +194,18 @@ def process_hs_codes(reference_df, shipment_df):
 
         if invalid_match:
 
-            client_hs = invalid_match["client_hs"]
-            adjusted_hs = invalid_match["adjusted_hs"]
-
             result.at[
                 index,
                 "Reference_Client_HS_code"
-            ] = client_hs
+            ] = invalid_match["client_hs"]
 
             result.at[
                 index,
                 "Reference_Adjusted_HS_code"
-            ] = adjusted_hs
+            ] = invalid_match["adjusted_hs"]
 
-            # Only change when adjusted value exists
+            adjusted_hs = invalid_match["adjusted_hs"]
+
             if adjusted_hs:
 
                 result.at[
@@ -269,12 +233,13 @@ def process_hs_codes(reference_df, shipment_df):
 
             continue
 
-        # ----------------------------------------------------
-        # PRIORITY 2:
+        # -----------------------------------------------------
+        # PRIORITY 2
         #
-        # Current HS is not an invalid Client_HS_code.
-        # Check whether it is already a valid Adjusted_HS_code.
-        # ----------------------------------------------------
+        # Check Adjusted_HS_code
+        #
+        # Already VALID
+        # -----------------------------------------------------
 
         valid_match = None
 
@@ -306,15 +271,12 @@ def process_hs_codes(reference_df, shipment_df):
 
             continue
 
-        # ----------------------------------------------------
-        # PRIORITY 3:
+        # -----------------------------------------------------
+        # PRIORITY 3
         #
-        # HS exists neither as invalid nor valid code.
-        # Do not automatically change.
-        # ----------------------------------------------------
+        # Unknown HS code
+        # -----------------------------------------------------
 
-        # If there is only one reference record, show it
-        # for review.
         if len(matches) == 1:
 
             result.at[
@@ -334,18 +296,10 @@ def process_hs_codes(reference_df, shipment_df):
 
         changed_flags.append(False)
 
-    # --------------------------------------------------------
-    # Internal flags
-    # --------------------------------------------------------
-
     result["_hs_changed"] = changed_flags
 
     return result
 
-
-# ============================================================
-# EXCEL FORMAT
-# ============================================================
 
 def create_excel(result_df):
 
@@ -356,8 +310,7 @@ def create_excel(result_df):
         errors="ignore"
     ).copy()
 
-    # Convert HS code columns to strings
-    # so leading zeros are preserved.
+    # Force HS codes to text
     hs_columns = [
         "Original_HS_code",
         "HS_code",
@@ -392,10 +345,6 @@ def create_excel(result_df):
 
     worksheet = workbook["HS Validation"]
 
-    # --------------------------------------------------------
-    # Header map
-    # --------------------------------------------------------
-
     headers = {
         cell.value: cell.column
         for cell in worksheet[1]
@@ -403,10 +352,6 @@ def create_excel(result_df):
 
     hs_col = headers.get("HS_code")
     status_col = headers.get("HS_Code_Status")
-
-    # --------------------------------------------------------
-    # Colors
-    # --------------------------------------------------------
 
     green_fill = PatternFill(
         fill_type="solid",
@@ -437,9 +382,9 @@ def create_excel(result_df):
         color="9C0006"
     )
 
-    # --------------------------------------------------------
-    # Row formatting
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
+    # FORMAT RESULT ROWS
+    # ---------------------------------------------------------
 
     for row_number in range(
         2,
@@ -461,10 +406,6 @@ def create_excel(result_df):
             column=status_col
         )
 
-        # --------------------------------------------
-        # INVALID → ADJUSTED
-        # --------------------------------------------
-
         if status == "Invalid → Adjusted":
 
             hs_cell.fill = green_fill
@@ -473,40 +414,26 @@ def create_excel(result_df):
             status_cell.fill = green_fill
             status_cell.font = green_font
 
-        # --------------------------------------------
-        # VALID
-        # --------------------------------------------
-
         elif status == "Valid":
 
             hs_cell.font = bold_font
             status_cell.font = bold_font
 
-        # --------------------------------------------
-        # REVIEW
-        # --------------------------------------------
-
         elif status == "No Match / Review":
 
             hs_cell.fill = yellow_fill
             status_cell.fill = yellow_fill
-
             status_cell.font = bold_font
-
-        # --------------------------------------------
-        # INVALID WITHOUT ADJUSTMENT
-        # --------------------------------------------
 
         elif status == "Invalid / No Adjustment":
 
             hs_cell.fill = red_fill
             status_cell.fill = red_fill
-
             status_cell.font = red_font
 
-    # --------------------------------------------------------
-    # Header formatting
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
+    # HEADER
+    # ---------------------------------------------------------
 
     header_fill = PatternFill(
         fill_type="solid",
@@ -527,21 +454,13 @@ def create_excel(result_df):
             vertical="center"
         )
 
-    # --------------------------------------------------------
-    # Freeze header
-    # --------------------------------------------------------
-
     worksheet.freeze_panes = "A2"
-
-    # --------------------------------------------------------
-    # Auto filter
-    # --------------------------------------------------------
 
     worksheet.auto_filter.ref = worksheet.dimensions
 
-    # --------------------------------------------------------
-    # Column widths
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
+    # COLUMN WIDTH
+    # ---------------------------------------------------------
 
     for column_cells in worksheet.columns:
 
@@ -554,12 +473,11 @@ def create_excel(result_df):
         for cell in column_cells:
 
             try:
-                length = len(
-                    str(cell.value)
-                )
 
-                if length > max_length:
-                    max_length = length
+                max_length = max(
+                    max_length,
+                    len(str(cell.value))
+                )
 
             except Exception:
                 pass
@@ -571,10 +489,6 @@ def create_excel(result_df):
             50
         )
 
-    # --------------------------------------------------------
-    # Final file
-    # --------------------------------------------------------
-
     final_output = BytesIO()
 
     workbook.save(final_output)
@@ -585,262 +499,263 @@ def create_excel(result_df):
 
 
 # ============================================================
-# STREAMLIT UI
+# STREAMLIT MODULE ENTRY POINT
 # ============================================================
 
-st.title("📦 HS Code Validation & Adjustment")
+def run():
 
-st.markdown(
-    """
-This tool validates the **HS_code from the second file**
-against the first-file reference.
+    st.title("🔎 APC HS Code Validation")
 
-### Validation priority
+    st.markdown(
+        """
+        ### Validation Rules
 
-**1. `Client_HS_code` = Invalid**
+        **Priority 1 — Invalid**
 
-If the second-file `HS_code` is found here,
-it will be replaced by the corresponding
-`Adjusted_HS_code`.
+        The `HS_code` from the second file is checked against
+        `Client_HS_code` from the first file.
 
-**2. `Adjusted_HS_code` = Valid**
+        If found, it is considered **Invalid** and is replaced
+        with the corresponding `Adjusted_HS_code`.
 
-If the second-file `HS_code` is already here,
-it will remain unchanged.
+        **Priority 2 — Valid**
 
-**3. No match**
+        If it is not found in `Client_HS_code`, the application
+        checks `Adjusted_HS_code`.
 
-The HS code will remain unchanged and the row
-will be marked **No Match / Review**.
-"""
-)
+        If found, it is considered **Valid** and remains unchanged.
 
-st.divider()
+        **Priority 3 — Review**
 
-
-# ============================================================
-# FILE UPLOAD
-# ============================================================
-
-col1, col2 = st.columns(2)
-
-with col1:
-
-    st.subheader("1️⃣ First File — HS Reference")
-
-    first_file = st.file_uploader(
-        "Upload reference Excel",
-        type=["xlsx", "xls"],
-        key="first"
+        If neither is found, the original HS code is retained
+        and marked **No Match / Review**.
+        """
     )
 
-    st.caption(
-        "Client_Internal_tracking + "
-        "Goods_Description + "
-        "Client_HS_code + "
-        "Adjusted_HS_code"
-    )
+    st.divider()
 
+    # --------------------------------------------------------
+    # UPLOAD FILES
+    # --------------------------------------------------------
 
-with col2:
+    col1, col2 = st.columns(2)
 
-    st.subheader("2️⃣ Second File — Shipment")
+    with col1:
 
-    second_file = st.file_uploader(
-        "Upload shipment Excel",
-        type=["xlsx", "xls"],
-        key="second"
-    )
+        st.subheader(
+            "1️⃣ First File — HS Reference"
+        )
 
-    st.caption(
-        "Client_Internal_tracking + "
-        "Goods_Description + HS_code"
-    )
+        first_file = st.file_uploader(
+            "Upload First Excel File",
+            type=["xlsx", "xls"],
+            key="apc_hs_first_file"
+        )
 
+        st.caption(
+            "Required: Client_Internal_tracking, "
+            "Goods_Description, Client_HS_code, "
+            "Adjusted_HS_code"
+        )
 
-st.divider()
+    with col2:
 
+        st.subheader(
+            "2️⃣ Second File — Shipment"
+        )
 
-# ============================================================
-# PROCESS
-# ============================================================
+        second_file = st.file_uploader(
+            "Upload Second Excel File",
+            type=["xlsx", "xls"],
+            key="apc_hs_second_file"
+        )
 
-if first_file and second_file:
+        st.caption(
+            "Required: Client_Internal_tracking, "
+            "Goods_Description, HS_code"
+        )
 
-    if st.button(
-        "🚀 Validate HS Codes",
-        type="primary",
-        use_container_width=True
-    ):
+    st.divider()
 
-        try:
+    # --------------------------------------------------------
+    # RUN VALIDATION
+    # --------------------------------------------------------
 
-            with st.spinner(
-                "Checking HS codes..."
-            ):
+    if first_file and second_file:
 
-                reference_df = pd.read_excel(
-                    first_file,
-                    dtype=str
+        if st.button(
+            "🚀 Validate HS Codes",
+            type="primary",
+            use_container_width=True
+        ):
+
+            try:
+
+                with st.spinner(
+                    "Checking HS codes..."
+                ):
+
+                    reference_df = pd.read_excel(
+                        first_file,
+                        dtype=str
+                    )
+
+                    shipment_df = pd.read_excel(
+                        second_file,
+                        dtype=str
+                    )
+
+                    reference_df.columns = (
+                        reference_df.columns
+                        .str.strip()
+                    )
+
+                    shipment_df.columns = (
+                        shipment_df.columns
+                        .str.strip()
+                    )
+
+                    result = process_hs_codes(
+                        reference_df,
+                        shipment_df
+                    )
+
+                    excel_file = create_excel(
+                        result
+                    )
+
+                st.success(
+                    "HS code validation completed successfully."
                 )
 
-                shipment_df = pd.read_excel(
-                    second_file,
-                    dtype=str
+                # ------------------------------------------------
+                # SUMMARY
+                # ------------------------------------------------
+
+                status_counts = (
+                    result["HS_Code_Status"]
+                    .value_counts()
                 )
 
-                # Clean headers
-                reference_df.columns = (
-                    reference_df.columns
-                    .str.strip()
+                total = len(result)
+
+                adjusted = status_counts.get(
+                    "Invalid → Adjusted",
+                    0
                 )
 
-                shipment_df.columns = (
-                    shipment_df.columns
-                    .str.strip()
+                valid = status_counts.get(
+                    "Valid",
+                    0
                 )
 
-                # Process
-                result = process_hs_codes(
-                    reference_df,
-                    shipment_df
+                review = status_counts.get(
+                    "No Match / Review",
+                    0
                 )
 
-                # Create Excel
-                excel_file = create_excel(
-                    result
+                no_adjustment = status_counts.get(
+                    "Invalid / No Adjustment",
+                    0
                 )
 
-            # ------------------------------------------------
-            # SUMMARY
-            # ------------------------------------------------
+                st.subheader(
+                    "📊 Validation Summary"
+                )
 
-            status_counts = (
-                result["HS_Code_Status"]
-                .value_counts()
-            )
+                c1, c2, c3, c4, c5 = st.columns(5)
 
-            total = len(result)
+                c1.metric(
+                    "Total",
+                    total
+                )
 
-            adjusted = status_counts.get(
-                "Invalid → Adjusted",
-                0
-            )
+                c2.metric(
+                    "Adjusted",
+                    adjusted
+                )
 
-            valid = status_counts.get(
-                "Valid",
-                0
-            )
+                c3.metric(
+                    "Valid",
+                    valid
+                )
 
-            review = status_counts.get(
-                "No Match / Review",
-                0
-            )
+                c4.metric(
+                    "Review",
+                    review
+                )
 
-            invalid_no_adjustment = status_counts.get(
-                "Invalid / No Adjustment",
-                0
-            )
+                c5.metric(
+                    "No Adjustment",
+                    no_adjustment
+                )
 
-            st.success(
-                "HS code validation completed."
-            )
+                st.divider()
 
-            st.subheader(
-                "📊 Validation Summary"
-            )
+                # ------------------------------------------------
+                # PREVIEW
+                # ------------------------------------------------
 
-            c1, c2, c3, c4, c5 = st.columns(5)
+                st.subheader(
+                    "🔎 Result Preview"
+                )
 
-            c1.metric(
-                "Total",
-                total
-            )
+                preview_columns = [
+                    "Client_Internal_tracking",
+                    "Goods_Description",
+                    "Original_HS_code",
+                    "Reference_Client_HS_code",
+                    "Reference_Adjusted_HS_code",
+                    "HS_code",
+                    "HS_Code_Status"
+                ]
 
-            c2.metric(
-                "Invalid → Adjusted",
-                adjusted
-            )
+                preview_columns = [
+                    col
+                    for col in preview_columns
+                    if col in result.columns
+                ]
 
-            c3.metric(
-                "Valid",
-                valid
-            )
+                st.dataframe(
+                    result[
+                        preview_columns
+                    ].head(100),
+                    use_container_width=True
+                )
 
-            c4.metric(
-                "Review",
-                review
-            )
+                st.divider()
 
-            c5.metric(
-                "Invalid / No Adjustment",
-                invalid_no_adjustment
-            )
+                # ------------------------------------------------
+                # DOWNLOAD
+                # ------------------------------------------------
 
-            st.divider()
+                st.subheader(
+                    "⬇️ Download"
+                )
 
-            # ------------------------------------------------
-            # PREVIEW
-            # ------------------------------------------------
+                st.download_button(
+                    label="📥 Download Validated Excel",
+                    data=excel_file,
+                    file_name=(
+                        "APC_HS_Code_Validated_Output.xlsx"
+                    ),
+                    mime=(
+                        "application/vnd.openxmlformats-"
+                        "officedocument.spreadsheetml.sheet"
+                    ),
+                    use_container_width=True
+                )
 
-            st.subheader(
-                "🔎 Validation Preview"
-            )
+            except Exception as e:
 
-            preview_columns = [
-                "Client_Internal_tracking",
-                "Goods_Description",
-                "Original_HS_code",
-                "Reference_Client_HS_code",
-                "Reference_Adjusted_HS_code",
-                "HS_code",
-                "HS_Code_Status"
-            ]
+                st.error(
+                    "Failed to process the Excel files."
+                )
 
-            preview_columns = [
-                col
-                for col in preview_columns
-                if col in result.columns
-            ]
+                st.exception(e)
 
-            st.dataframe(
-                result[
-                    preview_columns
-                ].head(100),
-                use_container_width=True
-            )
+    else:
 
-            st.divider()
-
-            # ------------------------------------------------
-            # DOWNLOAD
-            # ------------------------------------------------
-
-            st.subheader(
-                "⬇️ Download"
-            )
-
-            st.download_button(
-                label="📥 Download Validated Excel",
-                data=excel_file,
-                file_name=(
-                    "HS_Code_Validated_Output.xlsx"
-                ),
-                mime=(
-                    "application/vnd.openxmlformats-"
-                    "officedocument.spreadsheetml.sheet"
-                ),
-                use_container_width=True
-            )
-
-        except Exception as error:
-
-            st.error(
-                f"Error: {error}"
-            )
-
-else:
-
-    st.info(
-        "Upload both Excel files to start."
-    )
+        st.info(
+            "Upload both Excel files to begin."
+        )
