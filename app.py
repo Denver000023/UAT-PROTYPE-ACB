@@ -33,10 +33,10 @@ from modules import (
     ezclear,
     spliptpdf,
     compresspdf,
-    #hr_payroll,
     hscode,
 
     #OTHER MODULES  
+    #hr_payroll,
     #test_sharepoint,
     #excelmerger,
     #gst,
@@ -56,8 +56,87 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def login():
+
+    # Already authenticated
+    if st.session_state.get("authenticated", False):
+        return True
+
+    # Hide sidebar while logged out
+    st.markdown(
+        """
+        <style>
+            [data-testid="stSidebar"] {
+                display: none;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        """
+        <div style="
+            max-width: 450px;
+            margin: 100px auto 20px auto;
+            padding: 35px;
+            border-radius: 15px;
+            background: white;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            text-align: center;
+        ">
+            <h1>🔐 ACB Enterprise Portal</h1>
+            <p style="color:#666;">
+                Please sign in to continue
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    username = st.text_input(
+        "Username",
+        key="login_username"
+    )
+
+    password = st.text_input(
+        "Password",
+        type="password",
+        key="login_password"
+    )
+
+    if st.button(
+        "🔐 Login",
+        use_container_width=True
+    ):
+
+        # Get all users from secrets
+        users = st.secrets["credentials"]["users"]
+
+        # Check username and password
+        if username in users and password == users[username]:
+
+            st.session_state.authenticated = True
+            st.session_state.username = username
+
+            st.session_state.pop("login_username", None)
+            st.session_state.pop("login_password", None)
+
+            st.rerun()
+
+        else:
+            st.error("❌ Invalid username or password.")
+
+    return False
+
+if not login():
+    st.stop()
 # --------LOAD THEME----------
 load_css()
+
+st.sidebar.markdown(
+    f"👤 **Logged in as:** {st.session_state.username}"
+)
 
 # -------------STATE-----------
 if "module" not in st.session_state:
@@ -100,8 +179,8 @@ NAV_GROUPS = {
         "📑 Split PDF": "SPLIT_PDF",
         "📦 Compress PDF": "compresspdf",
         "📊 EZCLEAR": "ezclear",
-        #"💰 HR PAYROLL": "hr_payroll",
         "🔎 HSCODE SEARCH": "hscode",
+        #"💰 HR PAYROLL": "hr_payroll",
     }
 }
 
@@ -157,8 +236,8 @@ MODULES = {
     "SPLIT_PDF": spliptpdf.run,
     "ezclear": ezclear.run,
     "compresspdf": compresspdf.run,
-    #"hr_payroll": hr_payroll.run,
     "hscode": hscode.run,
+    #"hr_payroll": hr_payroll.run,
     #"excelmerger": excelmerger.run,
     #"gst": gst.run,
     #"candata_to_gets_format": candata_to_gets_format.run,
