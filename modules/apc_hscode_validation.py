@@ -444,10 +444,8 @@ def create_excel(
             vertical="center"
         )
 
-    worksheet.freeze_panes = "A2"
-
     worksheet.auto_filter.ref = (
-        worksheet.dimensions
+        f"A2:{get_column_letter(worksheet.max_column)}{worksheet.max_row}"
     )
 
     # Automatically size Excel columns.
@@ -624,7 +622,8 @@ def run():
 
                     shipment_df = pd.read_excel(
                         second_file,
-                        dtype=str
+                        dtype=str,
+                        skiprows=[1]
                     )
 
                     shipment_df.columns = (
