@@ -8,8 +8,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 
-# ======= CLEAN VALUE =======
-
+# Clean values for consistent matching.
 def clean_value(value):
 
     if pd.isna(value):
@@ -23,8 +22,7 @@ def clean_value(value):
     return value
 
 
-# ======= NORMALIZE DESCRIPTION =======
-
+# Normalize descriptions for client-file matching.
 def normalize_description(value):
 
     value = clean_value(value)
@@ -36,128 +34,7 @@ def normalize_description(value):
     return value
 
 
-# ======= VALIDATE HS CODES =======
-
-def validate_hs_codes(
-    reference_df,
-    shipment_df
-):
-
-    if "Client_HS_code" not in reference_df.columns:
-
-        raise ValueError(
-            "First file must contain: Client_HS_code"
-        )
-
-    if "Adjusted_HS_code" not in reference_df.columns:
-
-        raise ValueError(
-            "First file must contain: Adjusted_HS_code"
-        )
-
-    if "HS_code" not in shipment_df.columns:
-
-        raise ValueError(
-            "Second file must contain: HS_code"
-        )
-
-    result_df = shipment_df.copy()
-
-    hs_lookup = {}
-
-    for _, row in reference_df.iterrows():
-
-        client_hs = clean_value(
-            row["Client_HS_code"]
-        )
-
-        adjusted_hs = clean_value(
-            row["Adjusted_HS_code"]
-        )
-
-        if not client_hs:
-            continue
-
-        hs_lookup[
-            client_hs
-        ] = adjusted_hs
-
-    result_df["_Original_HS_code"] = (
-        result_df["HS_code"]
-        .apply(clean_value)
-    )
-
-    result_df["_HS_Code_Status"] = (
-        "Valid / Not in Invalid List"
-    )
-
-    result_df["_HS_Code_Changed"] = False
-
-    for index, value in result_df[
-        "HS_code"
-    ].items():
-
-        current_hs = clean_value(value)
-
-        if not current_hs:
-            result_df.at[
-                index,
-                "_HS_Code_Status"
-            ] = "Blank"
-
-            continue
-
-        if current_hs in hs_lookup:
-
-            adjusted_hs = hs_lookup[
-                current_hs
-            ]
-
-            if not adjusted_hs:
-
-                result_df.at[
-                    index,
-                    "_HS_Code_Status"
-                ] = "Invalid / No Adjustment"
-
-                continue
-
-            if current_hs != adjusted_hs:
-
-                result_df.at[
-                    index,
-                    "HS_code"
-                ] = adjusted_hs
-
-                result_df.at[
-                    index,
-                    "_HS_Code_Status"
-                ] = "Invalid → Adjusted"
-
-                result_df.at[
-                    index,
-                    "_HS_Code_Changed"
-                ] = True
-
-            else:
-
-                result_df.at[
-                    index,
-                    "_HS_Code_Status"
-                ] = "Invalid List / Same Code"
-
-        else:
-
-            result_df.at[
-                index,
-                "_HS_Code_Status"
-            ] = "Valid / Not in Invalid List"
-
-    return result_df
-
-
-# ======= ADD CLIENT HS CODE =======
-
+# Collect Client_HS_code from the third file.
 def add_client_hs_code(
     shipment_df,
     client_df
@@ -222,9 +99,7 @@ def add_client_hs_code(
             goods_description
         )
 
-        client_hs_lookup[
-            lookup_key
-        ] = client_hs
+        client_hs_lookup[lookup_key] = client_hs
 
     result_df["Client_HS_code"] = ""
 
@@ -266,8 +141,131 @@ def add_client_hs_code(
     return result_df
 
 
-# ======= PREPARE FINAL COLUMNS =======
+# Use Client_HS_code to look up the first file master.
+# The master file determines the final HS_code.
+def apply_master_hs_adjustment(
+    result_df,
+    reference_df
+):
 
+    required_reference_columns = [
+        "Client_HS_code",
+        "Adjusted_HS_code"
+    ]
+
+    for column in required_reference_columns:
+
+        if column not in reference_df.columns:
+
+            raise ValueError(
+                f"First file must contain: {column}"
+            )
+
+    if "HS_code" not in result_df.columns:
+
+        raise ValueError(
+            "Second file must contain: HS_code"
+        )
+
+    result_df = result_df.copy()
+
+    result_df["_Original_HS_code"] = (
+        result_df["HS_code"]
+        .apply(clean_value)
+    )
+
+    result_df["_HS_Code_Status"] = (
+        "No Client HS Match"
+    )
+
+    result_df["_HS_Code_Changed"] = False
+
+    master_lookup = {}
+
+    for _, row in reference_df.iterrows():
+
+        client_hs = clean_value(
+            row["Client_HS_code"]
+        )
+
+        adjusted_hs = clean_value(
+            row["Adjusted_HS_code"]
+        )
+
+        if not client_hs:
+            continue
+
+        master_lookup[client_hs] = adjusted_hs
+
+    for index, row in result_df.iterrows():
+
+        client_hs = clean_value(
+            row["Client_HS_code"]
+        )
+
+        original_hs = clean_value(
+            row["HS_code"]
+        )
+
+        if not client_hs:
+
+            result_df.at[
+                index,
+                "_HS_Code_Status"
+            ] = "No Client HS Match"
+
+            continue
+
+        if client_hs not in master_lookup:
+
+            result_df.at[
+                index,
+                "_HS_Code_Status"
+            ] = "Client HS Not in Master"
+
+            continue
+
+        adjusted_hs = master_lookup[
+            client_hs
+        ]
+
+        if not adjusted_hs:
+
+            result_df.at[
+                index,
+                "_HS_Code_Status"
+            ] = "Master Match / No Adjustment"
+
+            continue
+
+        if original_hs != adjusted_hs:
+
+            result_df.at[
+                index,
+                "HS_code"
+            ] = adjusted_hs
+
+            result_df.at[
+                index,
+                "_HS_Code_Status"
+            ] = "Client HS → Master Adjustment"
+
+            result_df.at[
+                index,
+                "_HS_Code_Changed"
+            ] = True
+
+        else:
+
+            result_df.at[
+                index,
+                "_HS_Code_Status"
+            ] = "Master Adjustment / Same Code"
+
+    return result_df
+
+
+# Prepare the final export while preserving shipment columns.
 def prepare_final_dataframe(
     result_df,
     original_columns
@@ -321,8 +319,7 @@ def prepare_final_dataframe(
     return export_df
 
 
-# ======= CREATE FINAL EXCEL =======
-
+# Create and format the final Excel workbook.
 def create_excel(
     result_df,
     original_columns
@@ -369,8 +366,6 @@ def create_excel(
         "Client_HS_code"
     )
 
-    # ======= EXCEL STYLES =======
-
     changed_fill = PatternFill(
         fill_type="solid",
         fgColor="C6EFCE"
@@ -401,14 +396,11 @@ def create_excel(
         color="FFFFFF"
     )
 
-    # ======= HIGHLIGHT ADJUSTED HS CODES =======
-
+    # Highlight HS codes adjusted through the master file.
     if hs_column:
 
         for excel_row, changed in enumerate(
-            result_df[
-                "_HS_Code_Changed"
-            ],
+            result_df["_HS_Code_Changed"],
             start=2
         ):
 
@@ -422,14 +414,11 @@ def create_excel(
                 cell.fill = changed_fill
                 cell.font = changed_font
 
-    # ======= HIGHLIGHT CLIENT HS CODES =======
-
+    # Highlight Client_HS_code values collected from the third file.
     if client_hs_column:
 
         for excel_row, value in enumerate(
-            result_df[
-                "Client_HS_code"
-            ],
+            result_df["Client_HS_code"],
             start=2
         ):
 
@@ -443,8 +432,7 @@ def create_excel(
                 cell.fill = client_fill
                 cell.font = client_font
 
-    # ======= FORMAT HEADER =======
-
+    # Format the Excel header.
     for cell in worksheet[1]:
 
         cell.fill = header_fill
@@ -456,18 +444,13 @@ def create_excel(
             vertical="center"
         )
 
-    # ======= FREEZE HEADER =======
-
     worksheet.freeze_panes = "A2"
-
-    # ======= ENABLE FILTER =======
 
     worksheet.auto_filter.ref = (
         worksheet.dimensions
     )
 
-    # ======= COLUMN WIDTH =======
-
+    # Automatically size Excel columns.
     for column_cells in worksheet.columns:
 
         max_length = 0
@@ -495,8 +478,6 @@ def create_excel(
             50
         )
 
-    # ======= RETURN FILE =======
-
     final_output = BytesIO()
 
     workbook.save(
@@ -508,8 +489,7 @@ def create_excel(
     return final_output
 
 
-# ======= STREAMLIT MODULE =======
-
+# Run the Streamlit application.
 def run():
 
     st.title(
@@ -518,34 +498,41 @@ def run():
 
     st.markdown(
         """
-        **First File**
+        **First File — HS Master File**
 
-        `Client_HS_code` = Invalid HS codes  
-        `Adjusted_HS_code` = Valid replacement HS codes
+        `Client_HS_code` = Client HS code used for master lookup  
+        `Adjusted_HS_code` = Correct replacement HS code
 
-        **Second File**
+        **Second File — Shipment File**
 
-        `HS_code` = HS code to validate  
+        `HS_code` = Original shipment HS code  
         `Client_Internal_tracking` = Tracking used for client matching
 
-        **Third File**
+        **Third File — Client File**
 
         `Reliable_tracking` = Client tracking number  
         `Goods_Description` = Product description  
         `HS_code` = Client HS code
+
+        The Client HS code is collected from the Third File
+        and then looked up in the First File Master.
+
+        If the Client HS code is found in the Master,
+        its `Adjusted_HS_code` becomes the final `HS_code`.
+
+        If the Client HS code is not found in the Master,
+        the original shipment `HS_code` remains unchanged.
         """
     )
 
     st.divider()
-
-    # ======= FILE UPLOAD =======
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
 
         st.subheader(
-            "1️⃣ HS Reference"
+            "1️⃣ HS Master File"
         )
 
         first_file = st.file_uploader(
@@ -596,12 +583,10 @@ def run():
         )
 
         st.caption(
-            "Reliable_tracking + Goods_Description + HS_code"
+            "Client HS information"
         )
 
     st.divider()
-
-    # ======= VALIDATE FILES =======
 
     if (
         first_file
@@ -617,10 +602,9 @@ def run():
 
             try:
 
-                # ======= READ FIRST FILE =======
-
+                # Read the master file.
                 with st.spinner(
-                    "Reading first file..."
+                    "Reading HS master file..."
                 ):
 
                     reference_df = pd.read_excel(
@@ -633,10 +617,9 @@ def run():
                         .str.strip()
                     )
 
-                # ======= READ SECOND FILE =======
-
+                # Read the shipment file.
                 with st.spinner(
-                    "Reading second file..."
+                    "Reading shipment file..."
                 ):
 
                     shipment_df = pd.read_excel(
@@ -649,8 +632,7 @@ def run():
                         .str.strip()
                     )
 
-                # ======= READ THIRD FILE =======
-
+                # Read the client file.
                 with st.spinner(
                     "Reading client file..."
                 ):
@@ -665,40 +647,39 @@ def run():
                         .str.strip()
                     )
 
-                # ======= VALIDATE SECOND FILE =======
-
-                with st.spinner(
-                    "Validating shipment HS codes..."
-                ):
-
-                    result_df = validate_hs_codes(
-                        reference_df,
-                        shipment_df
-                    )
-
-                # ======= MATCH CLIENT HS CODES =======
-
-                with st.spinner(
-                    "Matching client HS codes..."
-                ):
-
-                    result_df = add_client_hs_code(
-                        result_df,
-                        client_df
-                    )
-
                 original_columns = (
                     shipment_df.columns.tolist()
                 )
 
-                # ======= CREATE DOWNLOAD FILE =======
+                # Collect Client_HS_code from the third file.
+                with st.spinner(
+                    "Matching client information..."
+                ):
 
-                excel_file = create_excel(
-                    result_df,
-                    original_columns
-                )
+                    result_df = add_client_hs_code(
+                        shipment_df,
+                        client_df
+                    )
 
-                # ======= SUMMARY =======
+                # Use Client_HS_code to check the master file.
+                with st.spinner(
+                    "Checking Client HS codes against master..."
+                ):
+
+                    result_df = apply_master_hs_adjustment(
+                        result_df,
+                        reference_df
+                    )
+
+                # Create the final Excel file.
+                with st.spinner(
+                    "Creating final Excel file..."
+                ):
+
+                    excel_file = create_excel(
+                        result_df,
+                        original_columns
+                    )
 
                 adjusted_count = int(
                     result_df[
@@ -724,17 +705,33 @@ def run():
                     ).sum()
                 )
 
+                master_match_count = int(
+                    (
+                        ~result_df[
+                            "_HS_Code_Status"
+                        ].isin([
+                            "No Client HS Match",
+                            "Client HS Not in Master"
+                        ])
+                    ).sum()
+                )
+
+                client_hs_not_in_master_count = int(
+                    (
+                        result_df[
+                            "_HS_Code_Status"
+                        ]
+                        == "Client HS Not in Master"
+                    ).sum()
+                )
+
                 total_rows = len(
                     result_df
                 )
 
-                # ======= SUCCESS MESSAGE =======
-
                 st.success(
                     "HS code validation completed successfully."
                 )
-
-                # ======= SUMMARY =======
 
                 st.subheader(
                     "📊 Validation Summary"
@@ -762,8 +759,13 @@ def run():
                     client_no_match_count
                 )
 
-                # ======= PREVIEW =======
+                st.caption(
+                    f"Master HS matches: {master_match_count}  |  "
+                    f"Client HS codes not in master: "
+                    f"{client_hs_not_in_master_count}"
+                )
 
+                # Show the main validation result.
                 st.divider()
 
                 st.subheader(
@@ -791,6 +793,7 @@ def run():
                 ].copy()
 
                 preview_column_names = {
+
                     "Client_Internal_tracking":
                         "Client Internal Tracking",
 
@@ -823,8 +826,7 @@ def run():
                     hide_index=True
                 )
 
-                # ======= ADJUSTED HS CODES =======
-
+                # Show HS codes changed by the master.
                 if adjusted_count > 0:
 
                     st.divider()
@@ -840,12 +842,14 @@ def run():
                     ][
                         [
                             "_Original_HS_code",
+                            "Client_HS_code",
                             "HS_code"
                         ]
                     ].copy()
 
                     changed_df.columns = [
                         "Original HS_code",
+                        "Client_HS_code",
                         "Adjusted HS_code"
                     ]
 
@@ -855,8 +859,7 @@ def run():
                         hide_index=True
                     )
 
-                # ======= CLIENT HS CODES =======
-
+                # Show Client HS codes collected from the third file.
                 if client_match_count > 0:
 
                     st.divider()
@@ -884,8 +887,7 @@ def run():
                         hide_index=True
                     )
 
-                # ======= DOWNLOAD =======
-
+                # Create the final download section.
                 st.divider()
 
                 st.subheader(
@@ -893,9 +895,10 @@ def run():
                 )
 
                 st.caption(
-                    "The final Excel keeps all columns from "
-                    "the second file and places Client_HS_code "
-                    "before HS_code."
+                    "Client_HS_code is collected from the third file. "
+                    "The first file master determines the adjusted "
+                    "HS_code. If Client_HS_code is not found in the "
+                    "master, the original shipment HS_code remains unchanged."
                 )
 
                 st.download_button(
@@ -924,3 +927,8 @@ def run():
         st.info(
             "Upload all three files to begin."
         )
+
+
+if __name__ == "__main__":
+
+    run()
