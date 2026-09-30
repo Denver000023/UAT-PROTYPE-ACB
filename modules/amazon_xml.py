@@ -875,6 +875,22 @@ def run():
         except:
             weight = 0
 
+        # UOMs that must always have Converted_Quantity = 1
+        uoms_to_set_1 = [
+            "CTM",
+            "HLT",
+            "KNS",
+            "KSD",
+            "MBQ",
+            "MTK",
+            "MTQ",
+            "MWH",
+            "TMQ",
+            "TSD",
+        ]
+
+        if uom in uoms_to_set_1:
+            return 1
 
         if uom == "DZN":
             return round(qty / 12, 2)
@@ -889,31 +905,22 @@ def run():
             return round(weight * 0.453592, 2)
 
         elif uom == "TNE":
-            #return round((weight * 0.453592) / 1000, 6)
-            return max(round((weight * 0.453592) / 1000,2), 0.01)
+            return max(round((weight * 0.453592) / 1000, 2), 0.01)
 
         elif uom in [
             "MIL",
             "LTR",
             "NMB",
             "PAR",
-            "HLT",
             "LPA",
-            "MTQ",
-            "TMQ",
-            "MWH",
-            "KNS",
             "GBQ",
-            "MTK",
             "MTR",
-            "KSD",
-            "TSD",
-            "CTM",
             "NAP",
         ]:
             return qty
 
         return ""
+
 
     df["Converted_Quantity"] = df.apply(
         converted_quantity,
