@@ -907,8 +907,10 @@ def run():
         elif uom == "TNE":
             return max(round((weight * 0.453592) / 1000, 2), 0.01)
 
+        elif uom == "MIL":
+            return round(qty / 1000, 3)
+
         elif uom in [
-            "MIL",
             "LTR",
             "NMB",
             "PAR",
